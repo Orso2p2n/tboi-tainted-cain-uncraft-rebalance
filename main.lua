@@ -15,9 +15,12 @@ local calculatedRecipes = {}
 
 local usedRecipes = {}
 
+local amountRecipePickups = { 2, 5 }
+local amountRoomPickups = { 1, 3 }
+
 -- CONSTS
-local maxVelX = 2.5;
-local maxVelY = 2.5;
+local maxVelX = 3.0;
+local maxVelY = 3.0;
 
 local affectedPickups = {
     10, -- Hearts
@@ -29,49 +32,15 @@ local affectedPickups = {
     300 -- Cards
 }
 
-local itemPoolsPriorities = {
-    0, -- treasure
-    1, -- shop
-    2, -- boss
-    4, -- angel
-    3, -- devil
-    5, -- secret
-    6, -- library
-    7, -- shellGame
-    8, -- goldenChest
-    9, -- redChest
-    10, -- beggar
-    11, -- demonBeggar
-    12, -- curse
-    13, -- keyMaster
-    14, -- batteryBum
-    15, -- momsChest
-    16, -- greedTreasure
-    17, -- greedBoss
-    18, -- greedCurse
-    19, -- greedDevil
-    20, -- greedAngel
-    21, -- greedSecret
-    22, -- craneGame
-    23, -- craneGame
-    24, -- ultraSecret
-    25, -- bombBum
-    26, -- planetarium
-    27, -- oldChest
-    28, -- babyShop
-    29, -- woodenChest
-    30, -- rottenBeggar
-}
-
 local itemPoolsComponents = {
-    [3] = {3}, -- devil = black heart
-    [4] = {4}, -- angel = eternal heart
-    [8] = {5}, -- golden chest = golden heart
-    [5] = {6}, -- secret room = bone heart
-    [12] = {7}, -- curse room = rotten heart
-    [26] = {23}, -- planetarium = rune
-    [9] = {25}, -- red chest = cracked key
-    [7] = {29}, -- shell game = poop nugget
+    [3] = 3, -- devil = black heart
+    [4] = 4, -- angel = eternal heart
+    [8] = 5, -- golden chest = golden heart
+    [5] = 6, -- secret room = bone heart
+    [12] = 7, -- curse room = rotten heart
+    [26] = 23, -- planetarium = rune
+    [9] = 25, -- red chest = cracked key
+    [7] = 29, -- shell game = poop nugget
 }
 
 local componentToPickups = {
@@ -233,43 +202,97 @@ function TCUR:isPickupPartOfRecipe(pickupId)
 end
 
 function TCUR:onItemUncraft()
-    print("we found recipes for " .. #calculatedRecipes .. " items");
-    print("looking up item " .. lastTouchedItemId);
-
     -- look up if this item's recipe was already calculated
     local itemRecipes = calculatedRecipes[lastTouchedItemId];
     if (itemRecipes ~= nil and itemRecipes[1] ~= nil) then
-        print("we have a crafting recipe for item " .. lastTouchedItemId);
-
         -- Get a random recipe among the calculated recipes for the item
         local recipeIdx = rng:RandomInt(#itemRecipes) + 1;
         local recipe = itemRecipes[recipeIdx];
         
-        for key in pairs(recipe) do
-            local componentId = recipe[key];
-            local corrPickups = componentToPickups[componentId];
-            local i = rng:RandomInt(#corrPickups) + 1;
-            local chosenPickup = corrPickups[i];
+        -- Get the item pool of the current room and check if we have special pickups for it
+        local room = Game():GetRoom():GetType();
+        local roomItemPool = Game():GetItemPool():GetPoolForRoom(room, rng:GetSeed());
+        
+        local roomComponentId = -1;
+        for key, value in pairs(itemPoolsComponents) do
+            if (key == roomItemPool) then
+                roomComponentId = value;
+                break;
+            end
+        end
+        
+        -- Get count of each pickup
+        local itemQuality = Isaac.GetItemConfig():GetCollectible(lastTouchedItemId).Quality;
+        print("itemQuality: " .. itemQuality)
+        local recipeOffset = 0;
+        local roomOffset = 0;
+        if (itemQuality >= 2) then
+            roomOffset = 1;
+        end
+        if (itemQuality >= 4) then
+            recipeOffset = 1;
+        end
+        print("recipeOffset: " .. recipeOffset)
+        print("roomOffset: " .. roomOffset)
 
-            -- very very slight offset to prevent the pickup from being deleted and prevent overlapping pickups
-            local posX = lastTouchedItemPosition.X+0.001*key;
-            local posY = lastTouchedItemPosition.Y;
+        local minRecipePickups = amountRecipePickups[1] + recipeOffset;
+        local maxRecipePickups = amountRecipePickups[2];
+        local recipePickupsCount = minRecipePickups + rng:RandomInt(maxRecipePickups - minRecipePickups + 1);
+        print("recipePickupsCount: " .. recipePickupsCount)
+        
+        local minRoomPickups = amountRoomPickups[1] + roomOffset;
+        local maxRoomPickups = amountRoomPickups[2];
+        local roomPickupsCount = minRoomPickups + rng:RandomInt(maxRoomPickups - minRoomPickups + 1);
+        print("roomPickupsCount: " .. roomPickupsCount)
 
-            local velX = rng:RandomInt(maxVelX*2+1) - maxVelX;
-            local velY = rng:RandomInt(maxVelY*2+1) - maxVelY;
+        local amountPickupSpawned = 0
 
-            Isaac.Spawn(5, chosenPickup[1], chosenPickup[2], Vector(posX,posY), Vector(velX,velY), nil)
+        -- Spawn recipe pickups
+        for i = 1, recipePickupsCount, 1 do
+            local componentId = recipe[i];
+
+            TCUR:spawnComponent(componentId, amountPickupSpawned);
+            amountPickupSpawned = amountPickupSpawned + 1;
+        end
+
+        -- Spawn room pickups
+        for i = 1, roomPickupsCount, 1 do   
+            local componentId = 0
+            if (roomComponentId ~= -1) then
+                componentId = roomComponentId
+            else
+                local normalComponents = {1, 8, 12, 15}
+                local index = rng:RandomInt(#normalComponents) + 1
+                componentId = normalComponents[index]
+            end
+
+            TCUR:spawnComponent(componentId, amountPickupSpawned);
+            amountPickupSpawned = amountPickupSpawned + 1;
         end
 
         table.insert(usedRecipes, recipe)
     else
-        print("we don't have a crafting recipe for item " .. lastTouchedItemId);
         failsafeOnItemUncraft = true;
         return;
     end
 
     lastTouchedItemId = 0;
     lastTouchedItemPosition = Vector(-1,-1);
+end
+
+function TCUR:spawnComponent(componentId, amountPickupSpawned)
+    local corrPickups = componentToPickups[componentId];
+    local i = rng:RandomInt(#corrPickups) + 1;
+    local chosenPickup = corrPickups[i];
+
+    -- very very slight offset to prevent the pickup from being deleted and prevent overlapping pickups
+    local posX = lastTouchedItemPosition.X + 0.001 * (amountPickupSpawned + 1);
+    local posY = lastTouchedItemPosition.Y;
+
+    local velX = rng:RandomInt(maxVelX*2+1) - maxVelX;
+    local velY = rng:RandomInt(maxVelY*2+1) - maxVelY;
+
+    Isaac.Spawn(5, chosenPickup[1], chosenPickup[2], Vector(posX,posY), Vector(velX,velY), nil)
 end
 
 TCUR:AddCallback(ModCallbacks.MC_POST_UPDATE, TCUR.postUpdate);
