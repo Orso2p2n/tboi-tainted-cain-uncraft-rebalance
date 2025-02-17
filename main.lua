@@ -3,31 +3,17 @@ local rng = RNG();
 
 local EIDEnabled = true;
 
-local hasUncraftedItem = false;
+local failsafeOnItemUncraft = false;
 
 local lastTouchedItemId = 0;
 local lastTouchedItemPosition = Vector(-1,-1);
 
-local calculatedRecipes = { -- set as the fixed recipes and modified as we calculate recipes
-    [36] = {{29,29,29,29,29,29,29,29}},
-    [177] = {{8,8,8,8,8,8,8,8}},
-    [45] = {{1,1,1,1,1,1,1,1}},
-    [686] = {{2,2,2,2,2,2,2,2}},
-    [118] = {{3,3,3,3,3,3,3,3}},
-    [343] = {{12,12,12,12,12,12,12,12}},
-    [37] = {{15,15,15,15,15,15,15,15}},
-    [85] = {{21,21,21,21,21,21,21,21}},
-    [331] = {{1,2,4,4,4,4,4,5}},
-    [182] = {{4,4,4,4,4,4,4,4}},
-    [75] = {{22,22,22,22,22,22,22,22}},
-    [654] = {{3,22,22,22,22,22,22,22}},
-    [639] = {{1,1,1,1,1,1,7,7}},
-    [175] = {{12,12,12,12,12,12,13,13}},
-    [483] = {{17,17,17,17,17,17,17,17},{15,15,15,15,15,15,16,16}},
-    [628] = {{6,6,6,6,6,6,6,6}},
-    [489] = {{24,24,24,24,24,24,24,24}},
-    [580] = {{25,25,25,25,25,25,25,25}}
-}
+local recipesToCalculatePerFrame = 10;
+local failsafeRecipesToCalculatePerFrame = 1000;
+
+local calculatedRecipes = {}
+
+local usedRecipes = {}
 
 -- CONSTS
 local maxVelX = 2.5;
@@ -121,9 +107,79 @@ local componentToPickups = {
 }
 
 -- FUNCTIONS
+function TCUR:onGameStarted()
+    print("new game started")
+    failsafeOnItemUncraft = false
+    lastTouchedItemId = 0;
+    lastTouchedItemPosition = Vector(-1,-1);
+    calculatedRecipes = { -- set as the fixed recipes and modified as we calculate recipes
+        [36] = {{29,29,29,29,29,29,29,29}},
+        [177] = {{8,8,8,8,8,8,8,8}},
+        [45] = {{1,1,1,1,1,1,1,1}},
+        [686] = {{2,2,2,2,2,2,2,2}},
+        [118] = {{3,3,3,3,3,3,3,3}},
+        [343] = {{12,12,12,12,12,12,12,12}},
+        [37] = {{15,15,15,15,15,15,15,15}},
+        [85] = {{21,21,21,21,21,21,21,21}},
+        [331] = {{1,2,4,4,4,4,4,5}},
+        [182] = {{4,4,4,4,4,4,4,4}},
+        [75] = {{22,22,22,22,22,22,22,22}},
+        [654] = {{3,22,22,22,22,22,22,22}},
+        [639] = {{1,1,1,1,1,1,7,7}},
+        [175] = {{12,12,12,12,12,12,13,13}},
+        [483] = {{17,17,17,17,17,17,17,17},{15,15,15,15,15,15,16,16}},
+        [628] = {{6,6,6,6,6,6,6,6}},
+        [489] = {{24,24,24,24,24,24,24,24}},
+        [580] = {{25,25,25,25,25,25,25,25}}
+    }
+    usedRecipes = {}
+end
+
 function TCUR:postUpdate()
-    if (hasUncraftedItem) then
-        hasUncraftedItem = false;
+    -- print("we have " .. #calculatedRecipes .. " recipes")
+
+    local calculationCount = recipesToCalculatePerFrame;
+
+    if failsafeOnItemUncraft then
+        calculationCount = failsafeRecipesToCalculatePerFrame
+    end
+
+    for i = 1, calculationCount, 1 do
+        -- Calculate recipes
+        local components = {
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1,
+            rng:RandomInt(29)+1
+        };
+
+        local itemId = EID:calculateBagOfCrafting(components);
+        local calculatedRecipesOfItemId = calculatedRecipes[itemId]
+        if (calculatedRecipesOfItemId == nil) then
+            table.insert(calculatedRecipes, {[itemId] = {components}}); 
+        else
+            local alreadySaved = false
+            for i = 1, #calculatedRecipesOfItemId, 1 do
+                local savedComponents = calculatedRecipesOfItemId[i]
+
+                if calculatedRecipesOfItemId == components then
+                    alreadySaved = true
+                end
+            end
+
+            if alreadySaved == false then
+                table.insert(calculatedRecipesOfItemId, components);
+            end
+        end
+    end
+
+    if failsafeOnItemUncraft then
+        failsafeOnItemUncraft = false;
+        TCUR:onItemUncraft();
     end
 end
 
@@ -142,27 +198,6 @@ function TCUR:postPickupUpdate(item)
         
         -- Detect if external item descriptions is enabled
         if (isTaintedCain and EIDEnabled) then
-            -- Calculate recipes and look for the item
-            if (calculatedRecipes[itemId] == nil or calculatedRecipes[itemId][1] == nil) then
-                local components = {
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1,
-                    rng:RandomInt(29)+1
-                };
-
-                local calcItemId = EID:calculateBagOfCrafting(components);
-                if (calculatedRecipes[calcItemId] == nil) then
-                    table.insert(calculatedRecipes, {[calcItemId] = {components}}); 
-                else
-                    table.insert(calculatedRecipes[calcItemId], components);
-                end
-            end
-
             -- Detect if the item is touched by player. Two different conditions for failsafe 
             if (((player.Position - item.Position):Length() < player.Size + item.Size or item.Touched)) then
                 if (itemId > 0) then
@@ -172,8 +207,6 @@ function TCUR:postPickupUpdate(item)
             end
             
             if (lastTouchedItemId > 0 and not item:Exists()) then
-                hasUncraftedItem = true;
-                
                 TCUR.onItemUncraft();
             end
         end
@@ -200,14 +233,19 @@ function TCUR:isPickupPartOfRecipe(pickupId)
 end
 
 function TCUR:onItemUncraft()
-    local itemPools = EID.XMLItemIsInPools[lastTouchedItemId];
+    print("we found recipes for " .. #calculatedRecipes .. " items");
+    print("looking up item " .. lastTouchedItemId);
 
     -- look up if this item's recipe was already calculated
-    local cacheResult = calculatedRecipes[lastTouchedItemId];
-    if (cacheResult ~= nil and cacheResult[1] ~= nil) then
-        local recipeI = rng:RandomInt(#cacheResult) + 1;
-        local recipe = cacheResult[recipeI];
-        for key, value in pairs(recipe) do
+    local itemRecipes = calculatedRecipes[lastTouchedItemId];
+    if (itemRecipes ~= nil and itemRecipes[1] ~= nil) then
+        print("we have a crafting recipe for item " .. lastTouchedItemId);
+
+        -- Get a random recipe among the calculated recipes for the item
+        local recipeIdx = rng:RandomInt(#itemRecipes) + 1;
+        local recipe = itemRecipes[recipeIdx];
+        
+        for key in pairs(recipe) do
             local componentId = recipe[key];
             local corrPickups = componentToPickups[componentId];
             local i = rng:RandomInt(#corrPickups) + 1;
@@ -223,7 +261,11 @@ function TCUR:onItemUncraft()
             Isaac.Spawn(5, chosenPickup[1], chosenPickup[2], Vector(posX,posY), Vector(velX,velY), nil)
         end
 
-        table.remove(cacheResult, recipeI);
+        table.insert(usedRecipes, recipe)
+    else
+        print("we don't have a crafting recipe for item " .. lastTouchedItemId);
+        failsafeOnItemUncraft = true;
+        return;
     end
 
     lastTouchedItemId = 0;
@@ -233,6 +275,7 @@ end
 TCUR:AddCallback(ModCallbacks.MC_POST_UPDATE, TCUR.postUpdate);
 TCUR:AddCallback(ModCallbacks.MC_POST_PICKUP_UPDATE, TCUR.postPickupUpdate, PickupVariant.PICKUP_COLLECTIBLE);
 TCUR:AddCallback(ModCallbacks.MC_POST_PICKUP_INIT , TCUR.postPickupInit);
+TCUR:AddCallback(ModCallbacks.MC_POST_GAME_STARTED , TCUR.onGameStarted);
 
 if (EID == nil) then
     Isaac.DebugString("TAINTED CAIN UNCRAFTING REBALANCE - WARNING: External Item Descriptions must be installed and enabled for this mod to work.");
